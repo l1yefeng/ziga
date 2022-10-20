@@ -1,5 +1,5 @@
 const std = @import("std");
-const Zip = @import("zip.zig").Zip;
+const zip = @import("zip.zig");
 
 pub fn main() !void {
     var it = std.process.args();
@@ -10,22 +10,22 @@ pub fn main() !void {
         const allocator = gpa.allocator();
 
         // zip open
-        var z: Zip = undefined;
-        try z.open(allocator, path);
+        var z = try zip.openZip(allocator, path);
         defer z.close();
 
         // list zip entries
         for (z.members) |*member| {
-            try member.open();
-            defer member.close();
-
             var buf = try allocator.alloc(u8, member.orig_size);
             defer allocator.free(buf);
-            _ = try member.read(buf);
 
+            _ = try z.readm(member, buf);
             std.debug.print("{s}", .{buf});
         }
     } else {
         std.debug.panic("no path was given!\n", .{});
     }
+}
+
+test {
+    _ = @import("zip.zig");
 }
