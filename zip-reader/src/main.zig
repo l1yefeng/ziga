@@ -63,6 +63,8 @@ pub fn main() !void {
     }
 }
 
+/// Extract member m from its archive.
+/// Its name is used as the output path.
 fn extract(m: *zip.Zip.Member) !void {
     var out: fs.File = undefined;
     if (fs.path.dirname(m.name)) |dir| {

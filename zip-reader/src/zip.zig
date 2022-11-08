@@ -9,7 +9,6 @@ const ZipError = error{
     UnsupportedCompressionMethod,
     UnsupportedMultipleVolume,
     UnsupportedZip64,
-    Inflation,
 };
 
 const eocdr_start = [4]u8{ 'P', 'K', 0x05, 0x06 };
@@ -19,6 +18,7 @@ const cfh_min_len = 4 + 42;
 const lfh_start = [4]u8{ 'P', 'K', 0x03, 0x04 };
 const lfh_min_len = 4 + 26;
 
+/// Returns an opened zip file. Remember to call Zip.close().
 pub fn openZip(allocator: mem.Allocator, file: fs.File) !Zip {
     var z: Zip = undefined;
     try z.open(allocator, file);
@@ -34,6 +34,9 @@ pub fn openZip(allocator: mem.Allocator, file: fs.File) !Zip {
 // 1. scan to find EOCDR, which tells the location of CD
 // 2. read CD, which tells the location of local file data
 
+/// ZipInfo holds some info about the archive itself.
+/// The info is read from the EOCDR (end of central directory record).
+/// Zip struct uses it to locate the info of each member.
 const ZipInfo = struct {
     cd_entries: u16,
     cd_size: u32,
@@ -157,6 +160,7 @@ pub const Zip = struct {
         self.allocator.free(self.names_data);
     }
 
+    /// Member of an archive.
     pub const Member = struct {
         const Self = @This();
         const Inflator = deflate.Decompressor(fs.File.Reader);
@@ -170,7 +174,7 @@ pub const Zip = struct {
         inflator: ?Inflator,
 
         /// Initialise a member of zip file from a cfh.
-        /// `zr` MUST start reading at the cfh.
+        /// `z.file` MUST start reading at the cfh.
         /// The member's `name` will be stored to `for_name`, owned by caller.
         fn init(self: *Self, z: *Zip, for_name: []u8) !void {
             self.z = z;
@@ -257,17 +261,3 @@ fn findEocdrPosition(block: []const u8) ?usize {
 
     return null;
 }
-
-const testing = std.testing;
-
-// test "zip" {
-//     const allocator = testing.allocator;
-//
-//     var z = try openZip(allocator, "/tmp/test.zip");
-//     defer z.close();
-//
-//     for (z.members) |*m| {
-//         try m.open(allocator);
-//         defer m.close();
-//     }
-// }
