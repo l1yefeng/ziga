@@ -215,10 +215,10 @@ pub const Zip = struct {
             try zr.skipBytes(extra_len + cmt_len, .{});
         }
 
-        pub fn open(self: *Self, allocator: mem.Allocator) !void {
+        pub fn open(self: *Self) !void {
             try self.z.file.seekTo(self.data_offset);
             if (self.inflator) |*inflator| {
-                inflator.* = try deflate.decompressor(allocator, self.z.file.reader(), null);
+                inflator.* = try deflate.decompressor(self.z.allocator, self.z.file.reader(), null);
             }
         }
 
@@ -234,6 +234,17 @@ pub const Zip = struct {
             } else {
                 return self.z.file.read(bytes);
             }
+        }
+
+        const Reader = std.io.Reader(*Self, ReaderError, read);
+        pub const ReaderError = std.fs.File.ReadError || Inflator.Error;
+
+        fn reader(self: *Self) Reader {
+            return .{ .context = self };
+        }
+
+        pub fn limitedRedaer(self: *Self) std.io.LimitedReader(Reader) {
+            return std.io.limitedReader(self.reader(), self.orig_size);
         }
     };
 };

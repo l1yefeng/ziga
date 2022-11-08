@@ -77,17 +77,14 @@ fn extract(m: *zip.Zip.Member) !void {
     }
     defer out.close();
 
-    var fb: [300 * 1 << 10]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&fb);
-    try m.open(fba.allocator());
+    try m.open();
     defer m.close();
 
     var buf: [1 << 12]u8 = undefined;
-    var bytes_left = m.orig_size;
-    while (bytes_left > 0) {
-        const n = try m.read(&buf);
+    var reader = m.limitedRedaer();
+    while (reader.bytes_left > 0) {
+        const n = try reader.read(&buf);
         try out.writeAll(buf[0..n]);
-        bytes_left -= @intCast(@TypeOf(bytes_left), n);
     }
 }
 
