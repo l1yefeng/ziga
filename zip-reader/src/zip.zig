@@ -9,6 +9,7 @@ const ZipError = error{
     UnsupportedCompressionMethod,
     UnsupportedMultipleVolume,
     UnsupportedZip64,
+    Inflation,
 };
 
 const eocdr_start = [4]u8{ 'P', 'K', 0x05, 0x06 };
@@ -18,9 +19,9 @@ const cfh_min_len = 4 + 42;
 const lfh_start = [4]u8{ 'P', 'K', 0x03, 0x04 };
 const lfh_min_len = 4 + 26;
 
-pub fn openZip(allocator: mem.Allocator, path: []const u8) !Zip {
+pub fn openZip(allocator: mem.Allocator, file: fs.File) !Zip {
     var z: Zip = undefined;
-    try z.open(allocator, path);
+    try z.open(allocator, file);
     return z;
 }
 
@@ -100,25 +101,22 @@ const ZipInfo = struct {
 
         return ZipError.WrongFormat;
     }
-
 };
 
 /// Zip is the struct for a zip achive.
 /// Open before its members can be accessed;
 /// Close when access is no longer needed.
 pub const Zip = struct {
-
     allocator: mem.Allocator,
     file: fs.File,
     members: []Member,
     names_data: []u8,
 
-    pub fn open(self: *Zip, allocator: mem.Allocator, path: []const u8) !void {
+    pub fn open(self: *Zip, allocator: mem.Allocator, file: fs.File) !void {
         self.allocator = allocator;
 
         // open file on path
-        self.file = try fs.openFileAbsolute(path, .{ .mode = fs.File.OpenMode.read_only });
-        errdefer self.file.close();
+        self.file = file;
 
         // get zip info by reading the eocdr in file
         const stat = try self.file.stat();
@@ -132,12 +130,11 @@ pub const Zip = struct {
 
         // start reading cd from its offset
         try self.file.seekTo(info.cd_offset);
-        const zr = self.file.reader();
 
         // obtain info of each member
         var names_len: @TypeOf(self.names_data.len) = 0;
         for (self.members) |*m| {
-            try m.init(zr, self.names_data[names_len..]);
+            try m.init(self, self.names_data[names_len..]);
             names_len += m.name.len;
         }
 
@@ -156,41 +153,28 @@ pub const Zip = struct {
     }
 
     pub fn close(self: *Zip) void {
-        self.file.close();
         self.allocator.free(self.members);
         self.allocator.free(self.names_data);
     }
 
-    pub fn readm(self: *Zip, member: *Member, buffer: []u8) !void {
-        try self.file.seekTo(member.data_offset);
-
-        if (member.deflated) {
-            var buf: [300 * 1<<10]u8 = undefined;
-            var fba = std.heap.FixedBufferAllocator.init(&buf);
-            var inflator = try
-                deflate.decompressor(fba.allocator(), self.file.reader(), null);
-            defer inflator.deinit();
-            _ = try inflator.read(buffer[0..member.orig_size]);
-        } else {
-            _ = try self.file.read(buffer[0..member.orig_size]);
-        }
-    }
-
-    const Member = struct {
-
+    pub const Member = struct {
         const Self = @This();
+        const Inflator = deflate.Decompressor(fs.File.Reader);
 
-        deflated: bool,
+        z: *Zip,
         size: u32,
         orig_size: u32,
         name: []u8,
         lfh_offset: u32,
         data_offset: u32,
+        inflator: ?Inflator,
 
         /// Initialise a member of zip file from a cfh.
         /// `zr` MUST start reading at the cfh.
         /// The member's `name` will be stored to `for_name`, owned by caller.
-        fn init(self: *Self, zr: anytype, for_name: []u8) !void {
+        fn init(self: *Self, z: *Zip, for_name: []u8) !void {
+            self.z = z;
+            const zr = z.file.reader();
 
             // read and verify start
             try checkStart(zr, &cfh_start);
@@ -201,8 +185,8 @@ pub const Zip = struct {
             // read method
             const method = try zr.readIntLittle(u16);
             switch (method) {
-                0 => self.deflated = false,
-                8 => self.deflated = true,
+                0 => self.inflator = null,
+                8 => self.inflator.? = undefined,
                 else => return ZipError.UnsupportedCompressionMethod,
             }
 
@@ -226,8 +210,28 @@ pub const Zip = struct {
 
             try zr.skipBytes(extra_len + cmt_len, .{});
         }
-    };
 
+        pub fn open(self: *Self, allocator: mem.Allocator) !void {
+            try self.z.file.seekTo(self.data_offset);
+            if (self.inflator) |*inflator| {
+                inflator.* = try deflate.decompressor(allocator, self.z.file.reader(), null);
+            }
+        }
+
+        pub fn close(self: *Self) void {
+            if (self.inflator) |*inflator| {
+                inflator.deinit();
+            }
+        }
+
+        pub fn read(self: *Self, bytes: []u8) !usize {
+            if (self.inflator) |*inflator| {
+                return inflator.read(bytes);
+            } else {
+                return self.z.file.read(bytes);
+            }
+        }
+    };
 };
 
 fn checkStart(reader: anytype, start: []const u8) !void {
@@ -256,15 +260,14 @@ fn findEocdrPosition(block: []const u8) ?usize {
 
 const testing = std.testing;
 
-test "zip" {
-    const allocator = testing.allocator;
-
-    var z = try openZip(allocator, "/tmp/test.zip");
-    defer z.close();
-
-    for (z.members) |*m| {
-        var buf = try allocator.alloc(u8, m.orig_size);
-        defer allocator.free(buf);
-        try z.readm(m, buf);
-    }
-}
+// test "zip" {
+//     const allocator = testing.allocator;
+//
+//     var z = try openZip(allocator, "/tmp/test.zip");
+//     defer z.close();
+//
+//     for (z.members) |*m| {
+//         try m.open(allocator);
+//         defer m.close();
+//     }
+// }

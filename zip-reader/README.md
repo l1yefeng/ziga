@@ -1,4 +1,4 @@
-# zip-reader
+# zip-reader (work-in-progress)
 
 - `zip.zig` implements a zip file reader.
 - `main.zig` is an example of using it. It prints contents of all files in the given zip file.
