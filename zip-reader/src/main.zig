@@ -4,8 +4,8 @@ const fs = std.fs;
 const zip = @import("zip.zig");
 
 /// An unzip program using zip.zig.
-/// Very unsafe, in terms of CLI usage.
-/// Usage (path is absolute path to zip file):
+/// Very unsafe in terms of CLI usage.
+/// Usage:
 /// - exe <path>            unzip everything here
 /// - exe <path> <name>     unzip named file here
 /// - exe -l <path>         list members
